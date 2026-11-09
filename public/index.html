@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CF 多人白板</title>
+<style>
+  * { margin: 0; box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; background: #f5f6f8; display: flex; flex-direction: column; height: 100vh; }
+  header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: #fff; border-bottom: 1px solid #e2e5ea; }
+  h1 { font-size: 16px; color: #333; }
+  #status { font-size: 13px; color: #888; }
+  #peers { font-size: 13px; color: #f6821f; font-weight: 600; }
+  .toolbar { display: flex; gap: 8px; align-items: center; }
+  input[type=color] { width: 32px; height: 32px; border: none; cursor: pointer; }
+  input[type=range] { width: 90px; }
+  button { padding: 6px 14px; border: 1px solid #d0d5dd; background: #fff; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  button:hover { background: #f0f2f5; }
+  button.danger { color: #d92d20; border-color: #d92d20; }
+  #wrap { flex: 1; position: relative; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; touch-action: none; background: #fff; }
+  #roombar { padding: 6px 16px; background: #fff8ef; font-size: 13px; color: #93400a; border-bottom: 1px solid #f2dfc4; }
+  #roombar a { color: #b54708; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🖊️ CF 多人白板</h1>
+  <span id="status">连接中…</span>
+  <span id="peers"></span>
+  <div class="toolbar" style="margin-left:auto">
+    <input type="color" id="color" value="#e11d48">
+    <input type="range" id="width" min="1" max="12" value="3" title="笔宽">
+    <button id="clear" class="danger">清空</button>
+  </div>
+</header>
+<div id="roombar"></div>
+<div id="wrap"><canvas id="board"></canvas></div>
+
+<script>
+// 房间名：URL hash 即房间，例如 /#team-a → /room/team-a
+const room = (location.hash || "#default").slice(1) || "default";
+document.getElementById("roombar").innerHTML =
+  "房间 <b>" + room + "</b> — 分享链接：" +
+  '<a href="' + location.href + '">' + location.href + "</a>";
+
+const wsProto = location.protocol === "https:" ? "wss" : "ws";
+const canvas = document.getElementById("board");
+const ctx = canvas.getContext("2d");
+const statusEl = document.getElementById("status");
+const peersEl = document.getElementById("peers");
+const colorEl = document.getElementById("color");
+const widthEl = document.getElementById("width");
+
+let myId = null, drawing = false, pts = [], pendingClear = false;
+
+function clearBoard() { // transform 安全清屏（无论 ctx 处于什么缩放状态都清干净）
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.restore();
+}
+
+function resize() {
+  const r = canvas.getBoundingClientRect();
+  const d = window.devicePixelRatio || 1;
+  if (canvas.width !== r.width * d) {
+    const snap = canvas.toDataURL(); // 重设尺寸前暂存画面
+    canvas.width = r.width * d; canvas.height = r.height * d;
+    ctx.scale(d, d);
+    const img = new Image();
+    img.onload = () => ctx.drawImage(img, 0, 0, r.width, r.height);
+    img.src = snap;
+  }
+}
+new ResizeObserver(resize).observe(canvas); resize();
+
+function drawStroke(s) {
+  ctx.strokeStyle = s.c; ctx.lineWidth = s.w;
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  ctx.beginPath();
+  s.pts.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
+  ctx.stroke();
+}
+
+function send(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
+
+let ws = null;
+function connect() {
+  ws = new WebSocket(wsProto + "://" + location.host + "/room/" + room);
+  ws.onopen = () => statusEl.textContent = "✅ 已连接";
+  ws.onclose = () => {
+    statusEl.textContent = "❌ 断开，重连中…";
+    ws = null;
+    setTimeout(connect, 2000); // 原地重连，不整页刷新
+  };
+  ws.onerror = () => statusEl.textContent = "❌ 连接错误";
+  ws.onmessage = (e) => {
+    if (e.data === "pong") return;
+    let m; try { m = JSON.parse(e.data); } catch { return; }
+    switch (m.t) {
+      case "hello":
+        myId = m.id;
+        peersEl.textContent = "👤 " + m.peers + " 人在线";
+        m.history.forEach(h => h.t === "img" ? drawImageMsg(h) : drawStroke(h));
+        // 断线期间按过清空的，连上后立即把服务端历史也清掉
+        if (pendingClear) { send({ t: "clear" }); pendingClear = false; }
+        break;
+      case "peer-join": case "peer-leave":
+        peersEl.textContent = "👤 " + m.peers + " 人在线";
+        break;
+      case "stroke": drawStroke(m); break;
+      case "img": drawImageMsg(m); break;
+      case "clear": clearBoard(); break;
+    }
+  };
+}
+connect();
+setInterval(() => { if (ws && ws.readyState === 1) ws.send("ping"); }, 25000);
+
+// 切换房间：URL hash 变了就重连新房间
+window.addEventListener("hashchange", () => {
+  const newRoom = (location.hash || "#default").slice(1) || "default";
+  if (newRoom !== room) location.reload();
+});
+
+function pos(e) {
+  const r = canvas.getBoundingClientRect();
+  const p = e.touches ? e.touches[0] : e;
+  return [p.clientX - r.left, p.clientY - r.top];
+}
+function start(e) { drawing = true; pts = [pos(e)]; e.preventDefault(); }
+function move(e) {
+  if (!drawing) return;
+  pts.push(pos(e));
+  drawStroke({ pts: pts.slice(-2), c: colorEl.value, w: +widthEl.value }); // 本地实时
+  e.preventDefault();
+}
+function end() {
+  if (!drawing) return; drawing = false;
+  if (pts.length > 1) send({ t: "stroke", pts, c: colorEl.value, w: +widthEl.value });
+}
+canvas.addEventListener("mousedown", start);
+canvas.addEventListener("mousemove", move);
+window.addEventListener("mouseup", end);
+canvas.addEventListener("touchstart", start, { passive: false });
+canvas.addEventListener("touchmove", move, { passive: false });
+window.addEventListener("touchend", end);
+
+document.getElementById("clear").onclick = () => {
+  clearBoard(); // 无论连没连上都先清自己屏幕
+  if (ws && ws.readyState === 1) {
+    send({ t: "clear" });
+  } else {
+    pendingClear = true; // 断线中：记下来，重连后连服务端历史一起清
+    statusEl.textContent = "⚠️ 暂未连接，重连后会自动清空所有人的画面";
+  }
+};
+
+// ============ 截图粘贴 / 拖拽图片 ============
+function drawImageMsg(m) { // 渲染贴图：从 /img/<key> 异步加载
+  const im = new Image();
+  im.onload = () => ctx.drawImage(im, m.x, m.y, m.w, m.h);
+  im.src = "/room/" + room + "/img/" + m.key;
+}
+
+async function compress(blob) { // 压到 2MB 以下（DO 单值上限）
+  let bmp;
+  try { bmp = await createImageBitmap(blob); }
+  catch { throw new Error("无法读取图片"); }
+  for (const [maxDim, q] of [[1600, 0.82], [1280, 0.75], [960, 0.65], [720, 0.55]]) {
+    const s = Math.min(1, maxDim / Math.max(bmp.width, bmp.height));
+    const oc = document.createElement("canvas");
+    oc.width = Math.round(bmp.width * s); oc.height = Math.round(bmp.height * s);
+    oc.getContext("2d").drawImage(bmp, 0, 0, oc.width, oc.height);
+    const out = await new Promise(r => oc.toBlob(r, "image/jpeg", q));
+    if (out && out.size < 1200000) return out;
+  }
+  throw new Error("图片过大");
+}
+
+async function pasteImage(blob) {
+  statusEl.textContent = "⏳ 处理图片中…";
+  try {
+    const jpeg = await compress(blob);
+    const res = await fetch("/room/" + room + "/upload", { method: "POST", body: jpeg });
+    if (!res.ok) throw new Error("上传失败 " + res.status);
+    const { key } = await res.json();
+    const bmp = await createImageBitmap(jpeg);
+    // 放在当前视野中央，宽为原尺寸或视野宽 60% 取小者
+    const r = canvas.getBoundingClientRect();
+    const w = Math.min(bmp.width, r.width * 0.6);
+    const h = bmp.height * (w / bmp.width);
+    const msg = { t: "img", key, x: (r.width - w) / 2, y: (r.height - h) / 2, w, h };
+    drawImageMsg(msg);          // 自己立即显示
+    send(msg);                  // 广播给其他人 + 存服务端历史
+    statusEl.textContent = "✅ 已连接";
+  } catch (err) {
+    statusEl.textContent = "❌ " + err.message;
+  }
+}
+
+window.addEventListener("paste", (e) => {          // Ctrl+V 截图
+  for (const item of e.clipboardData?.items || []) {
+    if (item.type.startsWith("image/")) {
+      pasteImage(item.getAsFile()); e.preventDefault(); return;
+    }
+  }
+});
+canvas.addEventListener("dragover", (e) => e.preventDefault());
+canvas.addEventListener("drop", (e) => {           // 拖拽图片文件
+  e.preventDefault();
+  const f = e.dataTransfer?.files?.[0];
+  if (f && f.type.startsWith("image/")) pasteImage(f);
+});
+</script>
+</body>
+</html>

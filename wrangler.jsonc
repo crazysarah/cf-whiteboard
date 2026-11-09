@@ -1,0 +1,32 @@
+{
+  "name": "cf-whiteboard",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-01-15",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS"
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "WHITEBOARD",
+        "class_name": "Whiteboard"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["Whiteboard"]
+    }
+  ],
+  "routes": [
+    {
+      "pattern": "board.crazysarah.top",
+      "custom_domain": true
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}
