@@ -1,5 +1,6 @@
+wrangler.local.jsonc
+.dev.vars
 node_modules/
 .wrangler/
-.dev.vars
 _wb_check.js
 *.log

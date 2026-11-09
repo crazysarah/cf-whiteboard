@@ -20,12 +20,10 @@
       "new_sqlite_classes": ["Whiteboard"]
     }
   ],
-  "routes": [
-    {
-      "pattern": "board.crazysarah.top",
-      "custom_domain": true
-    }
-  ],
+  // 可选：绑定自己的域名（大陆访问 workers.dev 不稳定，建议配置）。
+  // 不要把真实域名提交到公开仓库——复制本文件为 wrangler.local.jsonc 并加入：
+  //   "routes": [{ "pattern": "board.yourdomain.com", "custom_domain": true }]
+  // 然后用 `wrangler deploy -c wrangler.local.jsonc` 部署。
   "observability": {
     "enabled": true
   }
