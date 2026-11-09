@@ -111,6 +111,15 @@ export class Whiteboard {
         this.state.storage.delete("history");
         this.broadcast(msg, null);
         break;
+      case "imgmove": { // 拖动贴图：按 id 找到最后贴的那张，更新坐标
+        const h = [...this.history].reverse().find(m => m.t === "img" && m.id === msg.id);
+        if (h && Number.isFinite(msg.x) && Number.isFinite(msg.y)) {
+          h.x = msg.x; h.y = msg.y;
+          this.state.storage.put("history", this.history);
+          this.broadcast({ t: "imgmove", id: msg.id, x: h.x, y: h.y }, null);
+        }
+        break;
+      }
       case "sig": // WebRTC 信令：{ to, data } — 语音/视频协商用
         this.broadcast(
           { t: "sig", from: msg.from || "?", data: msg.data }, null, msg.to
