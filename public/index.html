@@ -31,6 +31,7 @@
   <div class="toolbar" style="margin-left:auto">
     <input type="color" id="color" value="#e11d48">
     <input type="range" id="width" min="1" max="12" value="3" title="笔宽">
+    <button id="undo">撤销</button>
     <button id="clear" class="danger">清空</button>
   </div>
 </header>
@@ -137,6 +138,7 @@ function connect() {
         break;
       case "stroke": ops.push(m); redraw(); break;
       case "img":    ops.push(m); redraw(); break;
+      case "undo":   ops.pop(); redraw(); break;
       case "imgmove": {
         const h = ops.find(o => o.t === "img" && o.id === m.id);
         if (h) { h.x = m.x; h.y = m.y; redraw(); }
@@ -226,6 +228,13 @@ canvas.addEventListener("touchstart", start, { passive: false });
 canvas.addEventListener("touchmove", move, { passive: false });
 window.addEventListener("touchend", end);
 
+document.getElementById("undo").onclick = () => {
+  if (!(ws && ws.readyState === 1)) {
+    statusEl.textContent = "⚠️ 暂未连接，连上后再撤销";
+    return;
+  }
+  send({ t: "undo" }); // 服务端 pop 后广播，本地等广播回来同步（避免两边 pop 错位）
+};
 document.getElementById("clear").onclick = () => {
   ops = []; redraw(); // 无论连没连上都先清自己屏幕
   if (ws && ws.readyState === 1) {

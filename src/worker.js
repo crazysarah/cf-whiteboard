@@ -120,6 +120,15 @@ export class Whiteboard {
         }
         break;
       }
+      case "undo": { // 撤销最后一个操作（笔画或贴图；贴图连存储删）
+        const last = this.history.pop();
+        if (last) {
+          if (last.t === "img") this.state.storage.delete("img:" + last.key);
+          this.state.storage.put("history", this.history);
+          this.broadcast({ t: "undo" }, null);
+        }
+        break;
+      }
       case "sig": // WebRTC 信令：{ to, data } — 语音/视频协商用
         this.broadcast(
           { t: "sig", from: msg.from || "?", data: msg.data }, null, msg.to
